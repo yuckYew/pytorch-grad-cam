@@ -103,10 +103,13 @@ class GradCam:
         if index == None:
             index = np.argmax(output.cpu().data.numpy())
 
+
         one_hot = np.zeros((1, output.size()[-1]), dtype=np.float32)
         one_hot[0][index] = 1
         one_hot = torch.from_numpy(one_hot).requires_grad_(True)
+
         if self.cuda:
+            # Extract node value in fc1000 specified by index
             one_hot = torch.sum(one_hot.cuda() * output)
         else:
             one_hot = torch.sum(one_hot * output)
@@ -115,20 +118,25 @@ class GradCam:
         self.model.zero_grad()
         one_hot.backward(retain_graph=True)
 
+        # Backward gradients
         grads_val = self.extractor.get_gradients()[-1].cpu().data.numpy()
 
+        # Forward gradients
         target = features[-1]
-        target = target.cpu().data.numpy()[0, :]
+        target = target.cpu().data.numpy()[0, :] # (2048, 7, 7)
 
-        weights = np.mean(grads_val, axis=(2, 3))[0, :]
-        cam = np.zeros(target.shape[1:], dtype=np.float32)
+        # Channel-wise mean of backward gradients (GAP)
+        weights = np.mean(grads_val, axis=(2, 3))[0, :]    # (2048,)
+        cam = np.zeros(target.shape[1:], dtype=np.float32) # (7, 7)
 
         for i, w in enumerate(weights):
             cam += w * target[i, :, :]
+        import pdb; pdb.set_trace()
 
-        cam = np.maximum(cam, 0)
-        cam = cv2.resize(cam, input.shape[2:])
-        cam = cam - np.min(cam)
+        cam = np.maximum(cam, 0) # ReMOve negative values
+        cam = cv2.resize(cam, input.shape[2:])  # Resize to (224, 224)
+        # Normalize
+        cam = cam - np.min(cam) 
         cam = cam / np.max(cam)
         return cam
 
@@ -255,9 +263,10 @@ if __name__ == '__main__':
     mask = grad_cam(input, target_index)
 
     show_cam_on_image(img, mask)
+    # End of Grad-CAM code
 
     gb_model = GuidedBackpropReLUModel(model=model, use_cuda=args.use_cuda)
-    print(model._modules.items())
+    #print(model._modules.items())
     gb = gb_model(input, index=target_index)
     gb = gb.transpose((1, 2, 0))
     cam_mask = cv2.merge([mask, mask, mask])
